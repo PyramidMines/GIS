@@ -14,7 +14,7 @@ arcpy.env.overwriteOutput = True
 
 # Data location
 
-workspace = r'P:\MRichards\_Navy\NIU\_Thesis\Python'
+workspace = r'[FILE_PATH]'
 
 # Set current workspace to avoid having to specify the full path to the feature classes each time
 
@@ -24,19 +24,19 @@ arcpy.env.workspace = workspace
 
 XFieldName = 'longitude'
 YFieldName = 'latitude'
-outFolder = r'P:\MRichards\_Navy\NIU\_Thesis\Python\SHP'
+outFolder = r'[FILE PATH]'
 outputLayer = 'Somalia_ACLED'
 spatialRef = arcpy.SpatialReference(4326)
-csvFilePath = r'P:\MRichards\_Navy\NIU\_Thesis\Python\Somalia_ACLED_formated.csv'
+csvFilePath = r'[FILE PATH]\Somalia_ACLED_formated.csv'
 
 arcpy.MakeXYEventLayer_management(csvFilePath, XFieldName, YFieldName, outputLayer, spatial_reference=spatialRef)
 arcpy.FeatureClassToShapefile_conversion(outputLayer, outFolder)
 
 # Output location for space time cube
 
-cubeFolder = r'P:\MRichards\_Navy\NIU\_Thesis\Python\Cube'
-shapePath = r'P:\MRichards\ArcGIS_Pro\MyProject1.gdb\Somalia_ACLED_Project2'
-boundaryPath = r'P:\MRichards\ArcGIS_Pro\MyProject1.gdb\somalia_regions_Project2'
+cubeFolder = r'[FILE PATH]'
+shapePath = r'[FILE PATH]'
+boundaryPath = r'[FILE PATH]'
     
 # Process: Create Space Time Cube By Aggregating Points
 
