@@ -1,0 +1,58 @@
+# Spatial Time Cube Analysis
+
+# The purpose of the code below is to create a Space Time Cube, which may be beneficial to our analysis to understand, 
+# not only where IED attacks occurred in Somalia, but also their fequency at these locations over time.
+
+# Create a space time cube of IED ACLED data from Somalia
+
+import arcpy
+import os
+
+# Set geoprocessor to overwrite any outputs
+
+arcpy.env.overwriteOutput = True
+
+# Data location
+
+workspace = r'[FILE_PATH]'
+
+# Set current workspace to avoid having to specify the full path to the feature classes each time
+
+arcpy.env.workspace = workspace
+
+# Create a shape file from the ACLED *.csv file
+
+XFieldName = 'longitude'
+YFieldName = 'latitude'
+outFolder = r'[FILE PATH]'
+outputLayer = 'Somalia_ACLED'
+spatialRef = arcpy.SpatialReference(4326)
+csvFilePath = r'[FILE PATH]\Somalia_ACLED_formated.csv'
+
+arcpy.MakeXYEventLayer_management(csvFilePath, XFieldName, YFieldName, outputLayer, spatial_reference=spatialRef)
+arcpy.FeatureClassToShapefile_conversion(outputLayer, outFolder)
+
+# Output location for space time cube
+
+cubeFolder = r'[FILE PATH]'
+shapePath = r'[FILE PATH]'
+boundaryPath = r'[FILE PATH]'
+    
+# Process: Create Space Time Cube By Aggregating Points
+
+cube = arcpy.CreateSpaceTimeCube_stpm(shapePath, 'IED_HEX.nc', 'event_date', '#', '1 Months', 
+                                      'END_TIME', '#', '30 Miles', 'IED_Event SUM ZEROS; fatalities SUM ZEROS', 
+                                      'HEXAGON_GRID', boundaryPath, '#')
+                                      
+# Emerging Hot Spot Analysis of IED events using a 30 Mile radius of each event
+# and a 2 event time step to detect hot spots
+# Process: Emerging Hot Spot Analysis 
+    
+cube = arcpy.EmergingHotSpotAnalysis_stpm('IED_HEX.nc', 'COUNT', 'EHS_Somalia_IED_Events_HEX.shp', 
+                                          '30 Miles', 2, boundaryPath)
+                                          
+# Create a 3-D Time Space Cube representing Hot-and-Cold Spots over a 3 year period
+
+cube = arcpy.VisualizeSpaceTimeCube3D_stpm('IED_HEX.nc', 'COUNT', 
+                                           'HOT_AND_COLD_SPOT_RESULTS', 
+                                           'HOT_COLD_Somalia_IED_Events.shp')
