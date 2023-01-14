@@ -1,0 +1,591 @@
+## Import necessary libraries
+
+import os
+import arcpy
+from arcpy import env
+import sys
+import datetime as dt
+import tkinter as tk 
+from tkinter import simpledialog
+
+print()
+print('There will be several Pop-Up windows to enter a Reference Number, possible Zoning Codes, and Short Parcel ID.')
+
+# Script a pop-up box so the title of the map series can be created as a variable
+
+ROOT = tk.Tk()
+
+ROOT.withdraw()
+
+# The input dialog
+
+USER_TITLE_INP = simpledialog.askstring(title='Input title for Map Series',
+                                 prompt='What\'s your reference number? (example: 2023-S-ODP-001)')
+
+# Run test
+
+print()
+print('Designated Reference #: ' + USER_TITLE_INP)
+
+TITLE = USER_TITLE_INP
+
+# Create an if statement if the USER_TITLE_INP contains "PUD" then pop-ups for the current zoning
+# and proposed zoning will initiate
+
+if 'PUD' in TITLE:
+    CURRENT_ZONE = simpledialog.askstring(title='Input Current Zoning Classification',
+                                 prompt='What\'s the current zoning? (example: A-1, B-8, RR, etc.)')
+    PROPOSED_ZONE = simpledialog.askstring(title='Input Proposed Zoning Classification',
+                                 prompt='What\'s the proposed zoning? (example: PUD, BPUD, BPUDA, etc.)')
+
+### Assign a variable for the PID using a pop-up
+
+USER_PID_INP = simpledialog.askstring(title='Input PID to create Feature Layor',
+                                     prompt='What\'s the short Parcel Identification Number? (example: 700903000190) ***NO SPACES OR DASHES***')
+
+# Run test
+
+print()
+print('Designated PID #: ' + USER_PID_INP)
+
+PARCEL = USER_PID_INP
+
+print()
+print('Please give me a moment while I look into creating that for you.')
+
+# Create a feature layer
+
+# Set overwrite option
+
+arcpy.env.overwriteOutput = True
+
+# Select parcel based on attribute
+
+APRX = arcpy.mp.ArcGISProject(r'[PROJECT FILE PATH]')
+aprxMAP = APRX.listMaps('Location_Map')[0]
+aprxLYR = aprxMAP.listLayers('ParcelOwner') [0]
+
+SELECTION = """PID = """ "'"+ PARCEL + "'" 
+    
+arcpy.SelectLayerByAttribute_management(aprxLYR, 
+                                        "NEW_SELECTION", SELECTION)
+
+# If the selected_parcel layer already exists from a past running of the script, delete it
+
+if arcpy.Exists(r'[LAYER LOCATION IN GDB]'):
+    arcpy.Delete_management(r'[LAYER LOCATION IN GDB]')
+
+# Write the selected features to a new feature class
+
+arcpy.CopyFeatures_management(aprxLYR, '[LAYER LOCATION IN GDB]')
+
+# Clear selection
+
+arcpy.SelectLayerByAttribute_management(aprxLYR, "CLEAR_SELECTION")
+
+print()
+print('This may take a moment.')
+
+# Find the layer and begin editing its symbology
+
+APRX = arcpy.mp.ArcGISProject(r'[PROJECT FILE PATH]')
+aprxMAP = APRX.listMaps('Location_Map')[0]
+aprxLYR = aprxMAP.listLayers("selected_PID") [0]
+aprxSYM = aprxLYR.symbology
+
+aprxSYM.renderer.symbol.applySymbolFromGallery("Airport") # Select 'Airport' color in Gallery
+aprxSYM.renderer.symbol.color = {'RGB' : [230, 0, 0, 100]} # Change RGB color to 'Poinsetta Red', set transparency to 0%
+aprxSYM.renderer.symbol.outlineColor = {'RGB' : [0, 0, 0, 100]} # Change outline to 'Black'
+#aprxSYM.renderer.symbol.outlineWidth = 3 # Change outline width to 3pt
+
+# Save changes to symbology to layer
+
+aprxLYR.symbology = aprxSYM
+
+# Add weight to selected_PID poly using CIM Maplex
+    
+lyr_cim = aprxLYR.getDefinition('V2')
+lc = lyr_cim.labelClasses[0]
+    
+lc.maplexLabelPlacementProperties.featureWeight = 3
+lc.maplexLabelPlacementProperties.polygonBoundaryWeight = 5
+    
+# Push the changes back to the layer object
+    
+aprxLYR.setDefinition(lyr_cim)
+
+# Find the map frame in the Location layout
+
+aprxLYTS = APRX.listLayouts('LOCATION')[0]
+
+# Zooms to the layer and sets the extent based on the layer
+
+aprxMF = aprxLYTS.listElements('MAPFRAME_ELEMENT', 'Layers Map Frame')[0]
+aprxMF.camera.setExtent(aprxMF.getLayerExtent(aprxLYR, False, True))
+
+# Sets the scale to 1:6000 if the 'Shape_Area' field is less than or equal to 65340 sqft else 1:12000
+
+FIELD = ['Shape_Area']
+
+with arcpy.da.SearchCursor(aprxLYR, FIELD) as cursor:
+    for row in cursor:
+        if row[0] <= 65340.000000:
+            aprxMF.camera.scale = 6000.0
+        else:
+            aprxMF.camera.scale = 12000.0
+
+# Edit title of may layout
+
+for lyt in APRX.listLayouts('LOCATION'): # Get the title text element and update it with the TITLE variable
+    for elm in lyt.listElements('TEXT_ELEMENT', 'Title'):
+        if elm.text != ' ':
+            elm.text = 'PROPERTY LOCATION - ' + TITLE
+            
+lyt.exportToPDF(r'[EXPORT LOCATION]',
+                pdf_accessibility=True) # Export layout with TITLE variable
+print()
+print('Alright!  Here we go!')
+print()
+print(elm.text + ' has been successfully exported as Map1!') # Run test
+print()
+print('Pulling Raster dataset for Aerials. This may take a second.')
+
+# Reference 'selected_PID' in LOCATION layout and add it to AERIAL layout
+
+APRX = arcpy.mp.ArcGISProject(r'[PROJECT FILE PATH]')
+aprxMAP = APRX.listMaps('Location_Map')[0]
+aprxLYR = aprxMAP.listLayers('selected_PID') [0]
+aprxAERIAL_MAP = APRX.listMaps('Aerial_Map') [0]
+reflyr = aprxAERIAL_MAP.listLayers('streets_arc') [0]
+
+aprxAERIAL_MAP.insertLayer(reflyr, aprxLYR, 'AFTER')
+
+# Find the layer and begin editing its symbology
+
+aprxAERIAL_LYR = aprxAERIAL_MAP.listLayers("selected_PID") [0]
+aprxSYM = aprxAERIAL_LYR.symbology
+
+aprxSYM.renderer.symbol.applySymbolFromGallery("Airport") # Select 'Airport' color in Gallery
+aprxSYM.renderer.symbol.color = {'RGB' : [0, 0, 0, 0]} # Change RGB color to 'Poinsetta Red', set transparency to 0%
+aprxSYM.renderer.symbol.outlineColor = {'RGB' : [255, 255, 0, 100]} # Change outline to 'Black'
+aprxSYM.renderer.symbol.outlineWidth = 3 # Change outline width to 3pt
+
+# Save changes to symbology to layer
+
+aprxAERIAL_LYR.symbology = aprxSYM
+
+# Add weight to selected_PID poly using CIM Maplex
+
+lyr_cim = aprxAERIAL_LYR.getDefinition('V2')
+lc = lyr_cim.labelClasses[0]
+    
+lc.maplexLabelPlacementProperties.featureWeight = 3
+lc.maplexLabelPlacementProperties.polygonBoundaryWeight = 5
+    
+# Push the changes back to the layer object
+    
+aprxAERIAL_LYR.setDefinition(lyr_cim)
+
+# Find the map frame in the Location layout
+
+aprxAERIAL_LYTS = APRX.listLayouts('AERIAL')[0]
+
+# Zooms to the layer and sets the extent based on the layer
+
+aprxAERIAL_MF = aprxAERIAL_LYTS.listElements('MAPFRAME_ELEMENT', 'Layers Map Frame')[0]
+aprxAERIAL_MF.camera.setExtent(aprxAERIAL_MF.getLayerExtent(aprxAERIAL_LYR, False, True))
+
+# Sets the scale to 1:2400 if the 'Shape_Area' field is less than or equal to 150,000 sqft 
+# or 1:4800 if less than or equal to 300,000 sqft or 1:9600 if anything else, i.e. larger than 300,000 sqft
+
+AERIAL_FIELD = ['Shape_Area']
+
+with arcpy.da.SearchCursor(aprxAERIAL_LYR, AERIAL_FIELD) as cursor:
+    for row in cursor:
+        if row[0] <= 150000.000000:
+            aprxAERIAL_MF.camera.scale = 2400.0
+        elif row[0] <= 300000.000000:
+            aprxAERIAL_MF.camera.scale = 4800.0
+        else:
+            aprxAERIAL_MF.camera.scale = 9600.0
+
+for lyt in APRX.listLayouts('AERIAL'): # Get the title text element and update it with the TITLE variable
+    for elm in lyt.listElements('TEXT_ELEMENT', 'Title'):
+        if elm.text != ' ':
+            elm.text = 'AERIAL - ' + TITLE
+            
+lyt.exportToPDF(r'[EXPORT LOCATION]',
+                pdf_accessibility=True) # Export layout with TITLE variable
+print()
+print(elm.text + ' has been successfully exported as Map2!') # Run test
+
+if 'MA' in TITLE:
+    sys.exit('MA map series complete!')
+
+# If PUD is contained in the Title then an if statement will trigger the Current / Proposed Layouts
+# Otherwise it will continue like a normal map series
+
+# Reference 'selected_PID' in LOCATION layout and add it to ZONING layout
+
+if 'PUD' in TITLE:
+    APRX = arcpy.mp.ArcGISProject(r'[PROJECT FILE PATH]')
+    aprxMAP = APRX.listMaps('Location_Map')[0]
+    aprxLYR = aprxMAP.listLayers('selected_PID') [0]
+    aprxZONING_MAP = APRX.listMaps('Zoning_Map') [0]
+    reflyr = aprxZONING_MAP.listLayers('streets_arc') [0]
+
+    aprxZONING_MAP.insertLayer(reflyr, aprxLYR, 'AFTER')
+
+    # Find the layer and begin editing its symbology
+
+    aprxZONING_LYR = aprxZONING_MAP.listLayers("selected_PID") [0]
+    aprxSYM = aprxZONING_LYR.symbology
+
+    aprxSYM.renderer.symbol.applySymbolFromGallery("Airport") # Select 'Airport' color in Gallery
+    aprxSYM.renderer.symbol.color = {'RGB' : [0, 0, 0, 0]} # Change RGB color to 'Poinsetta Red', set transparency to 0%
+    aprxSYM.renderer.symbol.outlineColor = {'RGB' : [0, 0, 0, 100]} # Change outline to 'Black'
+    aprxSYM.renderer.symbol.outlineWidth = 3 # Change outline width to 3pt
+
+    # Save changes to symbology to layer
+
+    aprxZONING_LYR.symbology = aprxSYM
+
+    # Find the map frame in the Location layout
+
+    aprxZONING_CURRENT_LYTS = APRX.listLayouts('ZONING - CURRENT')[0]
+
+    # Zooms to the layer and sets the extent based on the layer
+
+    aprxZONING_MF = aprxZONING_CURRENT_LYTS.listElements('MAPFRAME_ELEMENT', 'Layers Map Frame')[0]
+    aprxZONING_MF.camera.setExtent(aprxZONING_MF.getLayerExtent(aprxZONING_LYR, False, True))
+
+    # Sets the scale to 1:2400 if the 'Shape_Area' field is less than or equal to 150,000 sqft 
+    # or 1:4800 if less than or equal to 300,000 sqft or 1:9600 if anything else, i.e. larger than 300,000 sqft
+
+    ZONING_FIELD = ['Shape_Area']
+
+    with arcpy.da.SearchCursor(aprxZONING_LYR, ZONING_FIELD) as cursor:
+        for row in cursor:
+            if row[0] <= 150000.000000:
+                aprxZONING_MF.camera.scale = 2400.0
+            elif row[0] <= 300000.000000:
+                aprxZONING_MF.camera.scale = 4800.0
+            else:
+                aprxZONING_MF.camera.scale = 9600.0
+
+    for lyt in APRX.listLayouts('ZONING - CURRENT'): # Get the title text element and update it with the TITLE variable
+        for elm in lyt.listElements('TEXT_ELEMENT', 'Title'):
+            if elm.text != ' ':
+                elm.text = 'CURRENT ZONING CLASSIFICATION - ' + TITLE
+    
+    for lyt in APRX.listLayouts('ZONING - CURRENT'): # Change From/To Zoning Text with CURRENT_ZONE/PROPOSED_ZONE variable
+        for elmtxt in lyt.listElements('TEXT_ELEMENT', 'Zoning Text'):
+            if elmtxt.text != ' ':
+                elmtxt.text = 'From: ' + CURRENT_ZONE + ' ' + 'To: ' + PROPOSED_ZONE
+            
+    lyt.exportToPDF(r'[EXPORT LOCATION]',
+                pdf_accessibility=True) # Export layout with TITLE variable
+    print(elm.text + ' has been successfully exported as Map3!') # Run test
+    
+# Start Proposed Zoning Layout in if statement
+
+    APRX = arcpy.mp.ArcGISProject(r'[PROJECT FILE PATH]')
+    aprxMAP = APRX.listMaps('Location_Map')[0]
+    aprxLYR = aprxMAP.listLayers('selected_PID') [0]
+    aprxZONING_MAP = APRX.listMaps('Zoning_Map') [0]
+    reflyr = aprxZONING_MAP.listLayers('streets_arc') [0]
+
+    aprxZONING_MAP.insertLayer(reflyr, aprxLYR, 'AFTER')
+
+    # Find the layer and begin editing its symbology
+
+    aprxZONING_LYR = aprxZONING_MAP.listLayers("selected_PID") [0]
+    aprxSYM = aprxZONING_LYR.symbology
+    
+    if 'BPUD' in PROPOSED_ZONE:
+        aprxSYM.renderer.symbol.applySymbolFromGallery("Airport") # Select 'Airport' color in Gallery
+        aprxSYM.renderer.symbol.color = {'RGB' : [255, 0, 0, 100]} # Change RGB color to 'Poinsetta Red', set transparency to 0%
+        aprxSYM.renderer.symbol.outlineColor = {'RGB' : [0, 0, 0, 100]} # Change outline to 'Black'
+        aprxSYM.renderer.symbol.outlineWidth = 3 # Change outline width to 3pt
+    elif 'MPUD' in PROPOSED_ZONE:
+        aprxSYM.renderer.symbol.applySymbolFromGallery("Airport") # Select 'Airport' color in Gallery
+        aprxSYM.renderer.symbol.color = {'RGB' : [168, 56, 0, 100]} # Change RGB color to 'Poinsetta Red', set transparency to 0%
+        aprxSYM.renderer.symbol.outlineColor = {'RGB' : [0, 0, 0, 100]} # Change outline to 'Black'
+        aprxSYM.renderer.symbol.outlineWidth = 3 # Change outline width to 3pt
+    else:
+        aprxSYM.renderer.symbol.applySymbolFromGallery("Airport") # Select 'Airport' color in Gallery
+        aprxSYM.renderer.symbol.color = {'RGB' : [132, 0, 168, 100]} # Change RGB color to 'Poinsetta Red', set transparency to 0%
+        aprxSYM.renderer.symbol.outlineColor = {'RGB' : [0, 0, 0, 100]} # Change outline to 'Black'
+        aprxSYM.renderer.symbol.outlineWidth = 3 # Change outline width to 3pt
+
+    # Add weight to selected_PID poly using CIM Maplex
+    
+    lyr_cim = aprxZONING_LYR.getDefinition('V2')
+    lc = lyr_cim.labelClasses[0]
+    
+    lc.maplexLabelPlacementProperties.featureWeight = 3
+    lc.maplexLabelPlacementProperties.polygonBoundaryWeight = 5
+    
+    # Push the changes back to the layer object
+    
+    aprxZONING_LYR.setDefinition(lyr_cim)
+
+    # Save changes to symbology to layer
+
+    aprxZONING_LYR.symbology = aprxSYM
+
+    # Find the map frame in the Location layout
+
+    aprxZONING_PROPOSED_LYTS = APRX.listLayouts('ZONING - PROPOSED')[0]
+
+    # Zooms to the layer and sets the extent based on the layer
+
+    aprxZONING_MF = aprxZONING_PROPOSED_LYTS.listElements('MAPFRAME_ELEMENT', 'Layers Map Frame')[0]
+    aprxZONING_MF.camera.setExtent(aprxZONING_MF.getLayerExtent(aprxZONING_LYR, False, True))
+
+    # Sets the scale to 1:2400 if the 'Shape_Area' field is less than or equal to 150,000 sqft 
+    # or 1:4800 if less than or equal to 300,000 sqft or 1:9600 if anything else, i.e. larger than 300,000 sqft
+
+    ZONING_FIELD = ['Shape_Area']
+
+    with arcpy.da.SearchCursor(aprxZONING_LYR, ZONING_FIELD) as cursor:
+        for row in cursor:
+            if row[0] <= 150000.000000:
+                aprxZONING_MF.camera.scale = 2400.0
+            elif row[0] <= 300000.000000:
+                aprxZONING_MF.camera.scale = 4800.0
+            else:
+                aprxZONING_MF.camera.scale = 9600.0
+
+    for lyt in APRX.listLayouts('ZONING - PROPOSED'): # Get the title text element and update it with the TITLE variable
+        for elm in lyt.listElements('TEXT_ELEMENT', 'Title'):
+            if elm.text != ' ':
+                elm.text = 'PROPOSED ZONING CLASSIFICATION - ' + TITLE
+    
+    for lyt in APRX.listLayouts('ZONING - PROPOSED'): # Change From/To Zoning Text with CURRENT_ZONE/PROPOSED_ZONE variable
+        for elmtxt in lyt.listElements('TEXT_ELEMENT', 'Zoning Text'):
+            if elmtxt.text != ' ':
+                elmtxt.text = 'From: ' + CURRENT_ZONE + ' ' + 'To: ' + PROPOSED_ZONE
+                
+    for lyt in APRX.listLayouts('ZONING - PROPOSED'): # Change From/To Zoning Text with CURRENT_ZONE/PROPOSED_ZONE variable
+        for elmtxt2 in lyt.listElements('TEXT_ELEMENT', 'Zoning Code Text'):
+            if elmtxt2.text != ' ':
+                elmtxt2.text = PROPOSED_ZONE
+            
+    lyt.exportToPDF(r'[EXPORT LOCATION]',
+                pdf_accessibility=True) # Export layout with TITLE variable
+    print(elm.text + ' has been successfully exported as Map4!') # Run test
+else:
+    
+    # Reference 'selected_PID' in LOCATION layout and add it to ZONING layout
+
+    APRX = arcpy.mp.ArcGISProject(r'[PROJECT FILE PATH]')
+    aprxMAP = APRX.listMaps('Location_Map')[0]
+    aprxLYR = aprxMAP.listLayers('selected_PID') [0]
+    aprxZONING_MAP = APRX.listMaps('Zoning_Map') [0]
+    reflyr = aprxZONING_MAP.listLayers('streets_arc') [0]
+
+    aprxZONING_MAP.insertLayer(reflyr, aprxLYR, 'AFTER')
+
+    # Find the layer and begin editing its symbology
+
+    aprxZONING_LYR = aprxZONING_MAP.listLayers("selected_PID") [0]
+    aprxSYM = aprxZONING_LYR.symbology
+
+    aprxSYM.renderer.symbol.applySymbolFromGallery("Airport") # Select 'Airport' color in Gallery
+    aprxSYM.renderer.symbol.color = {'RGB' : [0, 0, 0, 0]} # Change RGB color to 'Poinsetta Red', set transparency to 0%
+    aprxSYM.renderer.symbol.outlineColor = {'RGB' : [0, 0, 0, 100]} # Change outline to 'Black'
+    aprxSYM.renderer.symbol.outlineWidth = 3 # Change outline width to 3pt
+
+    # Save changes to symbology to layer
+
+    aprxZONING_LYR.symbology = aprxSYM
+
+    # Find the map frame in the Location layout
+
+    aprxZONING_LYTS = APRX.listLayouts('ZONING')[0]
+
+    # Zooms to the layer and sets the extent based on the layer
+
+    aprxZONING_MF = aprxZONING_LYTS.listElements('MAPFRAME_ELEMENT', 'Layers Map Frame')[0]
+    aprxZONING_MF.camera.setExtent(aprxZONING_MF.getLayerExtent(aprxZONING_LYR, False, True))
+
+    # Sets the scale to 1:2400 if the 'Shape_Area' field is less than or equal to 150,000 sqft 
+    # or 1:4800 if less than or equal to 300,000 sqft or 1:9600 if anything else, i.e. larger than 300,000 sqft
+
+    ZONING_FIELD = ['Shape_Area']
+
+    with arcpy.da.SearchCursor(aprxZONING_LYR, ZONING_FIELD) as cursor:
+        for row in cursor:
+            if row[0] <= 150000.000000:
+                aprxZONING_MF.camera.scale = 2400.0
+            elif row[0] <= 300000.000000:
+                aprxZONING_MF.camera.scale = 4800.0
+            else:
+                aprxZONING_MF.camera.scale = 9600.0
+
+    for lyt in APRX.listLayouts('ZONING'): # Get the title text element and update it with the TITLE variable
+        for elm in lyt.listElements('TEXT_ELEMENT', 'Title'):
+            if elm.text != ' ':
+                elm.text = 'ZONING CLASSIFICATION - ' + TITLE
+            
+    lyt.exportToPDF(r'[EXPORT LOCATION]',
+                pdf_accessibility=True) # Export layout with TITLE variable
+    print(elm.text + ' has been successfully exported as Map3!') # Run test
+
+# Reference 'selected_PID' in LOCATION layout and add it to FLU layout
+
+APRX = arcpy.mp.ArcGISProject(r'[PROJECT FILE PATH]')
+aprxMAP = APRX.listMaps('Location_Map')[0]
+aprxLYR = aprxMAP.listLayers('selected_PID') [0]
+aprxFLU_MAP = APRX.listMaps('FLU_Map') [0]
+reflyr = aprxFLU_MAP.listLayers('streets_arc') [0]
+
+aprxFLU_MAP.insertLayer(reflyr, aprxLYR, 'AFTER')
+
+# Find the layer and begin editing its symbology
+
+aprxFLU_LYR = aprxFLU_MAP.listLayers("selected_PID") [0]
+aprxSYM = aprxFLU_LYR.symbology
+
+aprxSYM.renderer.symbol.applySymbolFromGallery("Airport") # Select 'Airport' color in Gallery
+aprxSYM.renderer.symbol.color = {'RGB' : [0, 0, 0, 0]} # Change RGB color to 'Poinsetta Red', set transparency to 0%
+aprxSYM.renderer.symbol.outlineColor = {'RGB' : [0, 0, 0, 100]} # Change outline to 'Black'
+aprxSYM.renderer.symbol.outlineWidth = 3 # Change outline width to 3pt
+
+# Save changes to symbology to layer
+
+aprxFLU_LYR.symbology = aprxSYM
+
+# Find the map frame in the Location layout
+
+aprxFLU_LYTS = APRX.listLayouts('FLU')[0]
+
+# Zooms to the layer and sets the extent based on the layer
+
+aprxFLU_MF = aprxFLU_LYTS.listElements('MAPFRAME_ELEMENT', 'Layers Map Frame')[0]
+aprxFLU_MF.camera.setExtent(aprxFLU_MF.getLayerExtent(aprxFLU_LYR, False, True))
+
+# Sets the scale to 1:2400 if the 'Shape_Area' field is less than or equal to 150,000 sqft 
+# or 1:4800 if less than or equal to 300,000 sqft or 1:9600 if anything else, i.e. larger than 300,000 sqft
+
+FLU_FIELD = ['Shape_Area']
+
+with arcpy.da.SearchCursor(aprxFLU_LYR, FLU_FIELD) as cursor:
+    for row in cursor:
+        if row[0] <= 150000.000000:
+            aprxFLU_MF.camera.scale = 2400.0
+        elif row[0] <= 300000.000000:
+            aprxFLU_MF.camera.scale = 4800.0
+        else:
+            aprxFLU_MF.camera.scale = 9600.0
+
+for lyt in APRX.listLayouts('FLU'): # Get the title text element and update it with the TITLE variable
+    for elm in lyt.listElements('TEXT_ELEMENT', 'Title'):
+        if elm.text != ' ':
+            elm.text = 'FUTURE LAND USE - ' + TITLE
+            
+lyt.exportToPDF(r'[EXPORT LOCATION]',
+                pdf_accessibility=True) # Export layout with TITLE variable
+print(elm.text + ' has been successfully exported as Map4!') # Run test
+
+# Reference 'selected_PID' in LOCATION layout and add it to ECO/NRMA layout
+
+APRX = arcpy.mp.ArcGISProject(r'[PROJECT FILE PATH]')
+aprxMAP = APRX.listMaps('Location_Map')[0]
+aprxLYR = aprxMAP.listLayers('selected_PID') [0]
+aprxECO_MAP = APRX.listMaps('ECO_Map') [0]
+reflyr = aprxECO_MAP.listLayers('streets_arc') [0]
+
+aprxECO_MAP.insertLayer(reflyr, aprxLYR, 'AFTER')
+
+# Find the layer and begin editing its symbology
+
+aprxECO_LYR = aprxECO_MAP.listLayers("selected_PID") [0]
+aprxSYM = aprxECO_LYR.symbology
+
+aprxSYM.renderer.symbol.applySymbolFromGallery("Airport") # Select 'Airport' color in Gallery
+aprxSYM.renderer.symbol.color = {'RGB' : [0, 0, 0, 0]} # Change RGB color to 'Poinsetta Red', set transparency to 0%
+aprxSYM.renderer.symbol.outlineColor = {'RGB' : [0, 0, 0, 100]} # Change outline to 'Black'
+aprxSYM.renderer.symbol.outlineWidth = 3 # Change outline width to 3pt
+
+# Save changes to symbology to layer
+
+aprxECO_LYR.symbology = aprxSYM
+
+# Add weight to selected_PID poly using CIM Maplex
+    
+lyr_cim = aprxECO_LYR.getDefinition('V2')
+lc = lyr_cim.labelClasses[0]
+    
+lc.maplexLabelPlacementProperties.featureWeight = 3
+lc.maplexLabelPlacementProperties.polygonBoundaryWeight = 5
+    
+# Push the changes back to the layer object
+    
+aprxECO_LYR.setDefinition(lyr_cim)
+
+# Find the map frame in the Location layout
+
+aprxECO_LYTS = APRX.listLayouts('ECO-NRMA')[0]
+
+# Zooms to the layer and sets the extent based on the layer
+
+aprxECO_MF = aprxECO_LYTS.listElements('MAPFRAME_ELEMENT', 'Layers Map Frame')[0]
+aprxECO_MF.camera.setExtent(aprxECO_MF.getLayerExtent(aprxECO_LYR, False, True))
+
+# Sets the scale to 1:2400 if the 'Shape_Area' field is less than or equal to 150,000 sqft 
+# or 1:4800 if less than or equal to 300,000 sqft or 1:9600 if anything else, i.e. larger than 300,000 sqft
+
+ECO_FIELD = ['Shape_Area']
+
+with arcpy.da.SearchCursor(aprxECO_LYR, ECO_FIELD) as cursor:
+    for row in cursor:
+        if row[0] <= 150000.000000:
+            aprxECO_MF.camera.scale = 2400.0
+        elif row[0] <= 300000.000000:
+            aprxECO_MF.camera.scale = 4800.0
+        else:
+            aprxECO_MF.camera.scale = 9600.0
+
+for lyt in APRX.listLayouts('ECO-NRMA'): # Get the title text element and update it with the TITLE variable
+    for elm in lyt.listElements('TEXT_ELEMENT', 'Title'):
+        if elm.text != ' ':
+            elm.text = 'ECO/NRMA OVERLAY - ' + TITLE
+            
+lyt.exportToPDF(r'[EXPORT LOCATION]',
+                pdf_accessibility=True) # Export layout with TITLE variable
+print(elm.text + ' has been successfully exported as Map5!') # Run test
+
+print()
+print('Ok! Almost done!')
+
+# Append all pdf documents into a single pdf file and delete all individual pdfs in the Append folder.
+
+#from PyPDF2 import PdfFileMerger
+
+# Create an instance of PdfFileMerger() class
+
+#merger = PdfFileMerger()
+
+#Create a list with file names
+
+#pdf_files = ['[EXPORT LOCATION]\Map1.pdf',
+ #            '[EXPORT LOCATION]\Map2.pdf',
+  #           '[EXPORT LOCATION]\Map3.pdf',
+   #          '[EXPORT LOCATION]\Map4.pdf',
+    #         '[EXPORT LOCATION]\Map5.pdf']
+
+#Iterate over the list of file names
+
+#for pdf_file in pdf_files:
+    #Append PDF files
+ #   merger.append(pdf_file)
+
+#Write out the merged PDF
+
+#merger.write('MAP SERIES - ' + TITLE + '.pdf')
+#merger.close()
+
+print('Maps are created and can be found in your append folder.')
+#print('MAP SERIES - ' + TITLE + ' has been created and sent to your Export file.')
